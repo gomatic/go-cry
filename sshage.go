@@ -41,9 +41,13 @@ func Decrypt(w io.Writer, r io.Reader, identities []age.Identity) error {
 	return nil
 }
 
+// IdentityFile is the path to an SSH private-key file that ParseIdentities
+// reads age identities from.
+type IdentityFile string
+
 // ParseIdentities reads an SSH private key file and returns age identities.
-func ParseIdentities(path string) ([]age.Identity, error) {
-	data, err := os.ReadFile(path)
+func ParseIdentities(path IdentityFile) ([]age.Identity, error) {
+	data, err := os.ReadFile(string(path))
 	if err != nil {
 		return nil, ErrOpenFile.Wrap(err, path)
 	}

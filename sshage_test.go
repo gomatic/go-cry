@@ -105,7 +105,7 @@ func TestDecrypt_WrongKey(t *testing.T) {
 
 	var decrypted bytes.Buffer
 	err := Decrypt(&decrypted, &encrypted, []age.Identity{id2})
-	must.Error(err)
+	must.ErrorIs(err, ErrDecrypt)
 }
 
 func TestEncryptDecrypt_MultipleRecipients(t *testing.T) {
@@ -143,7 +143,7 @@ func TestParseIdentities(t *testing.T) {
 	keyFile := filepath.Join(t.TempDir(), "id_ed25519")
 	must.NoError(os.WriteFile(keyFile, privPEM, 0o600))
 
-	ids, err := ParseIdentities(keyFile)
+	ids, err := ParseIdentities(IdentityFile(keyFile))
 	must.NoError(err)
 	want.Len(ids, 1)
 }
@@ -163,7 +163,7 @@ func TestParseIdentities_BadKey(t *testing.T) {
 	keyFile := filepath.Join(t.TempDir(), "id_bad")
 	must.NoError(os.WriteFile(keyFile, []byte("not a valid ssh key"), 0o600))
 
-	_, err := ParseIdentities(keyFile)
+	_, err := ParseIdentities(IdentityFile(keyFile))
 	must.ErrorIs(err, ErrParseIdentity)
 }
 
