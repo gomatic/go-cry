@@ -14,8 +14,14 @@ import (
 	"filippo.io/age/agessh"
 )
 
+// Recipients is the set of age recipients data is sealed to by Encrypt.
+type Recipients []age.Recipient
+
+// Identities is the set of age identities Decrypt attempts to unseal with.
+type Identities []age.Identity
+
 // Encrypt writes age-encrypted data from r to w for the given recipients.
-func Encrypt(w io.Writer, r io.Reader, recipients []age.Recipient) error {
+func Encrypt(w io.Writer, r io.Reader, recipients Recipients) error {
 	ew, err := age.Encrypt(w, recipients...)
 	if err != nil {
 		return ErrEncrypt.Wrap(err)
@@ -30,7 +36,7 @@ func Encrypt(w io.Writer, r io.Reader, recipients []age.Recipient) error {
 }
 
 // Decrypt writes age-decrypted data from r to w using the given identities.
-func Decrypt(w io.Writer, r io.Reader, identities []age.Identity) error {
+func Decrypt(w io.Writer, r io.Reader, identities Identities) error {
 	dr, err := age.Decrypt(r, identities...)
 	if err != nil {
 		return ErrDecrypt.Wrap(err)
@@ -46,7 +52,7 @@ func Decrypt(w io.Writer, r io.Reader, identities []age.Identity) error {
 type IdentityFile string
 
 // ParseIdentities reads an SSH private key file and returns age identities.
-func ParseIdentities(path IdentityFile) ([]age.Identity, error) {
+func ParseIdentities(path IdentityFile) (Identities, error) {
 	data, err := os.ReadFile(string(path))
 	if err != nil {
 		return nil, ErrOpenFile.Wrap(err, path)
@@ -57,5 +63,5 @@ func ParseIdentities(path IdentityFile) ([]age.Identity, error) {
 		return nil, ErrParseIdentity.Wrap(err)
 	}
 
-	return []age.Identity{id}, nil
+	return Identities{id}, nil
 }

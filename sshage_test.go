@@ -66,10 +66,10 @@ func TestEncryptDecrypt_Ed25519(t *testing.T) {
 	plaintext := []byte("secret data for ed25519")
 
 	var encrypted bytes.Buffer
-	must.NoError(Encrypt(&encrypted, bytes.NewReader(plaintext), []age.Recipient{rcpt}))
+	must.NoError(Encrypt(&encrypted, bytes.NewReader(plaintext), Recipients{rcpt}))
 
 	var decrypted bytes.Buffer
-	must.NoError(Decrypt(&decrypted, &encrypted, []age.Identity{id}))
+	must.NoError(Decrypt(&decrypted, &encrypted, Identities{id}))
 
 	want.Equal(plaintext, decrypted.Bytes())
 }
@@ -83,10 +83,10 @@ func TestEncryptDecrypt_RSA(t *testing.T) {
 	plaintext := []byte("secret data for rsa")
 
 	var encrypted bytes.Buffer
-	must.NoError(Encrypt(&encrypted, bytes.NewReader(plaintext), []age.Recipient{rcpt}))
+	must.NoError(Encrypt(&encrypted, bytes.NewReader(plaintext), Recipients{rcpt}))
 
 	var decrypted bytes.Buffer
-	must.NoError(Decrypt(&decrypted, &encrypted, []age.Identity{id}))
+	must.NoError(Decrypt(&decrypted, &encrypted, Identities{id}))
 
 	want.Equal(plaintext, decrypted.Bytes())
 }
@@ -101,10 +101,30 @@ func TestDecrypt_WrongKey(t *testing.T) {
 	plaintext := []byte("wrong key test")
 
 	var encrypted bytes.Buffer
-	must.NoError(Encrypt(&encrypted, bytes.NewReader(plaintext), []age.Recipient{rcpt1}))
+	must.NoError(Encrypt(&encrypted, bytes.NewReader(plaintext), Recipients{rcpt1}))
 
 	var decrypted bytes.Buffer
-	err := Decrypt(&decrypted, &encrypted, []age.Identity{id2})
+	err := Decrypt(&decrypted, &encrypted, Identities{id2})
+	must.ErrorIs(err, ErrDecrypt)
+}
+
+func TestDecrypt_Tampered(t *testing.T) {
+	t.Parallel()
+	must := require.New(t)
+
+	id, rcpt, _ := generateEd25519Identity(t)
+
+	var encrypted bytes.Buffer
+	must.NoError(Encrypt(&encrypted, bytes.NewReader([]byte("authenticated payload")), Recipients{rcpt}))
+
+	// age is authenticated encryption: flipping a single ciphertext byte must
+	// fail the integrity check rather than yield altered plaintext. Flip the
+	// final byte, which lands in the payload's authentication tag.
+	ciphertext := encrypted.Bytes()
+	ciphertext[len(ciphertext)-1] ^= 0xff
+
+	var decrypted bytes.Buffer
+	err := Decrypt(&decrypted, bytes.NewReader(ciphertext), Identities{id})
 	must.ErrorIs(err, ErrDecrypt)
 }
 
@@ -119,18 +139,18 @@ func TestEncryptDecrypt_MultipleRecipients(t *testing.T) {
 
 	// Encrypt for both recipients
 	var encrypted bytes.Buffer
-	must.NoError(Encrypt(&encrypted, bytes.NewReader(plaintext), []age.Recipient{rcpt1, rcpt2}))
+	must.NoError(Encrypt(&encrypted, bytes.NewReader(plaintext), Recipients{rcpt1, rcpt2}))
 
 	// Either identity should be able to decrypt.
 	encrypted1 := bytes.NewBuffer(encrypted.Bytes())
 	encrypted2 := bytes.NewBuffer(encrypted.Bytes())
 
 	var dec1 bytes.Buffer
-	must.NoError(Decrypt(&dec1, encrypted1, []age.Identity{id1}))
+	must.NoError(Decrypt(&dec1, encrypted1, Identities{id1}))
 	want.Equal(plaintext, dec1.Bytes())
 
 	var dec2 bytes.Buffer
-	must.NoError(Decrypt(&dec2, encrypted2, []age.Identity{id2}))
+	must.NoError(Decrypt(&dec2, encrypted2, Identities{id2}))
 	want.Equal(plaintext, dec2.Bytes())
 }
 
@@ -138,14 +158,25 @@ func TestParseIdentities(t *testing.T) {
 	t.Parallel()
 	want, must := assert.New(t), require.New(t)
 
-	_, _, privPEM := generateEd25519Identity(t)
+	_, rcpt, privPEM := generateEd25519Identity(t)
 
 	keyFile := filepath.Join(t.TempDir(), "id_ed25519")
 	must.NoError(os.WriteFile(keyFile, privPEM, 0o600))
 
 	ids, err := ParseIdentities(IdentityFile(keyFile))
 	must.NoError(err)
-	want.Len(ids, 1)
+	must.Len(ids, 1)
+
+	// The parsed identity must actually unseal data sealed to its matching
+	// SSH recipient: encrypt to rcpt, then round-trip through the loaded ids.
+	plaintext := []byte("parsed identity round-trip")
+
+	var encrypted bytes.Buffer
+	must.NoError(Encrypt(&encrypted, bytes.NewReader(plaintext), Recipients{rcpt}))
+
+	var decrypted bytes.Buffer
+	must.NoError(Decrypt(&decrypted, &encrypted, ids))
+	want.Equal(plaintext, decrypted.Bytes())
 }
 
 func TestParseIdentities_Nonexistent(t *testing.T) {
@@ -197,7 +228,7 @@ func TestEncrypt_CopyError(t *testing.T) {
 	must := require.New(t)
 
 	_, rcpt, _ := generateEd25519Identity(t)
-	err := Encrypt(&bytes.Buffer{}, failReader{}, []age.Recipient{rcpt})
+	err := Encrypt(&bytes.Buffer{}, failReader{}, Recipients{rcpt})
 	must.ErrorIs(err, ErrEncrypt)
 }
 
@@ -207,7 +238,7 @@ func TestEncrypt_WriterError(t *testing.T) {
 
 	_, rcpt, _ := generateEd25519Identity(t)
 	// age.Encrypt writes a header immediately; a failing writer surfaces there.
-	err := Encrypt(failWriter{}, bytes.NewReader([]byte("data")), []age.Recipient{rcpt})
+	err := Encrypt(failWriter{}, bytes.NewReader([]byte("data")), Recipients{rcpt})
 	must.ErrorIs(err, ErrEncrypt)
 }
 
@@ -233,7 +264,7 @@ func TestEncrypt_CloseError(t *testing.T) {
 
 	_, rcpt, _ := generateEd25519Identity(t)
 	// 200 bytes covers the ed25519 age header but not the ciphertext flush.
-	err := Encrypt(&budgetWriter{budget: 200}, bytes.NewReader([]byte("payload")), []age.Recipient{rcpt})
+	err := Encrypt(&budgetWriter{budget: 200}, bytes.NewReader([]byte("payload")), Recipients{rcpt})
 	must.ErrorIs(err, ErrEncrypt)
 }
 
@@ -244,8 +275,8 @@ func TestDecrypt_WriterError(t *testing.T) {
 	id, rcpt, _ := generateEd25519Identity(t)
 
 	var encrypted bytes.Buffer
-	must.NoError(Encrypt(&encrypted, bytes.NewReader([]byte("secret")), []age.Recipient{rcpt}))
+	must.NoError(Encrypt(&encrypted, bytes.NewReader([]byte("secret")), Recipients{rcpt}))
 
-	err := Decrypt(failWriter{}, &encrypted, []age.Identity{id})
+	err := Decrypt(failWriter{}, &encrypted, Identities{id})
 	must.ErrorIs(err, ErrDecrypt)
 }
