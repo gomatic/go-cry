@@ -17,7 +17,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func generateEd25519Identity(t *testing.T) (age.Identity, age.Recipient, []byte) {
+func generateEd25519Identity(t testing.TB) (age.Identity, age.Recipient, []byte) {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
@@ -278,5 +278,97 @@ func TestDecrypt_WriterError(t *testing.T) {
 	must.NoError(Encrypt(&encrypted, bytes.NewReader([]byte("secret")), Recipients{rcpt}))
 
 	err := Decrypt(failWriter{}, &encrypted, Identities{id})
+	must.ErrorIs(err, ErrDecrypt)
+}
+
+func TestEncryptDecrypt_Empty(t *testing.T) {
+	t.Parallel()
+	want, must := assert.New(t), require.New(t)
+
+	id, rcpt, _ := generateEd25519Identity(t)
+
+	// Empty plaintext must round-trip to empty plaintext, not error.
+	var encrypted bytes.Buffer
+	must.NoError(Encrypt(&encrypted, bytes.NewReader(nil), Recipients{rcpt}))
+
+	var decrypted bytes.Buffer
+	must.NoError(Decrypt(&decrypted, &encrypted, Identities{id}))
+	want.Empty(decrypted.Bytes())
+}
+
+func TestEncryptDecrypt_Large(t *testing.T) {
+	t.Parallel()
+	want, must := assert.New(t), require.New(t)
+
+	id, rcpt, _ := generateEd25519Identity(t)
+
+	// Exceed age's 64 KiB STREAM chunk size to exercise multi-chunk payloads.
+	plaintext := make([]byte, 256*1024)
+	_, err := rand.Read(plaintext)
+	must.NoError(err)
+
+	var encrypted bytes.Buffer
+	must.NoError(Encrypt(&encrypted, bytes.NewReader(plaintext), Recipients{rcpt}))
+
+	var decrypted bytes.Buffer
+	must.NoError(Decrypt(&decrypted, &encrypted, Identities{id}))
+	want.Equal(plaintext, decrypted.Bytes())
+}
+
+func TestDecrypt_Truncated(t *testing.T) {
+	t.Parallel()
+	must := require.New(t)
+
+	id, rcpt, _ := generateEd25519Identity(t)
+
+	var encrypted bytes.Buffer
+	must.NoError(Encrypt(&encrypted, bytes.NewReader([]byte("truncate me")), Recipients{rcpt}))
+
+	// A ciphertext cut short mid-stream must be rejected, never partially
+	// decrypted: the STREAM payload's final chunk (and its tag) is gone.
+	full := encrypted.Bytes()
+	truncated := full[:len(full)/2]
+
+	var decrypted bytes.Buffer
+	err := Decrypt(&decrypted, bytes.NewReader(truncated), Identities{id})
+	must.ErrorIs(err, ErrDecrypt)
+}
+
+func TestDecrypt_Garbage(t *testing.T) {
+	t.Parallel()
+	must := require.New(t)
+
+	id, _, _ := generateEd25519Identity(t)
+
+	// Bytes that are not an age header at all must be rejected at age.Decrypt.
+	var decrypted bytes.Buffer
+	err := Decrypt(&decrypted, bytes.NewReader([]byte("this is not an age file")), Identities{id})
+	must.ErrorIs(err, ErrDecrypt)
+}
+
+func TestDecrypt_EmptyInput(t *testing.T) {
+	t.Parallel()
+	must := require.New(t)
+
+	id, _, _ := generateEd25519Identity(t)
+
+	// An empty reader has no age header; decryption must fail with the sentinel.
+	var decrypted bytes.Buffer
+	err := Decrypt(&decrypted, bytes.NewReader(nil), Identities{id})
+	must.ErrorIs(err, ErrDecrypt)
+}
+
+func TestDecrypt_NoIdentities(t *testing.T) {
+	t.Parallel()
+	must := require.New(t)
+
+	_, rcpt, _ := generateEd25519Identity(t)
+
+	var encrypted bytes.Buffer
+	must.NoError(Encrypt(&encrypted, bytes.NewReader([]byte("data")), Recipients{rcpt}))
+
+	// Decrypting with no identities supplied must fail with the sentinel.
+	var decrypted bytes.Buffer
+	err := Decrypt(&decrypted, &encrypted, nil)
 	must.ErrorIs(err, ErrDecrypt)
 }

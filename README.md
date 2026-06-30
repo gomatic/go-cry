@@ -28,12 +28,13 @@ func main() {
 		panic(err)
 	}
 
+	// Seal data for that recipient.
 	var sealed bytes.Buffer
-	if err := sshage.Encrypt(&sealed, bytes.NewReader([]byte("secret")), nil /* []age.Recipient{rcpt} */); err != nil {
+	if err := sshage.Encrypt(&sealed, bytes.NewReader([]byte("secret")), sshage.Recipients{rcpt}); err != nil {
 		panic(err)
 	}
 
-	// Decrypt with identities loaded from an SSH private key.
+	// Decrypt with identities loaded from the matching SSH private key.
 	ids, err := sshage.ParseIdentities("/home/user/.ssh/id_ed25519")
 	if err != nil {
 		panic(err)
@@ -43,7 +44,6 @@ func main() {
 		panic(err)
 	}
 	fmt.Println(clear.String())
-	_ = rcpt
 }
 ```
 
