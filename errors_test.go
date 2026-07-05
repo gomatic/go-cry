@@ -8,64 +8,50 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestError_Error(t *testing.T) {
-	t.Parallel()
-	assert.Equal(t, "failed to decrypt", ErrDecrypt.Error())
-}
-
-func TestError_Wrap(t *testing.T) {
+// TestSentinels verifies each sentinel's contract: its constant text, that it
+// matches itself under errors.Is, and that no two sentinels match each other.
+func TestSentinels(t *testing.T) {
 	t.Parallel()
 
-	cause := errors.New("root cause")
-
-	tests := []struct {
-		err         error
-		name        string
-		wantMessage string
-		args        []any
-		wantCause   bool
+	sentinels := []struct {
+		wantErr  error
+		name     string
+		wantText string
 	}{
-		{
-			name:        "no args no cause returns the bare sentinel",
-			wantMessage: "failed to encrypt",
-		},
-		{
-			name:        "args only",
-			args:        []any{"path/to/file"},
-			wantMessage: "failed to encrypt: path/to/file",
-		},
-		{
-			name:        "cause only",
-			err:         cause,
-			wantMessage: "failed to encrypt: root cause",
-			wantCause:   true,
-		},
-		{
-			name:        "args and cause",
-			args:        []any{"path/to/file"},
-			err:         cause,
-			wantMessage: "failed to encrypt: path/to/file: root cause",
-			wantCause:   true,
-		},
+		{name: "encrypt", wantErr: ErrEncrypt, wantText: "failed to encrypt"},
+		{name: "decrypt", wantErr: ErrDecrypt, wantText: "failed to decrypt"},
+		{name: "open file", wantErr: ErrOpenFile, wantText: "failed to open file"},
+		{name: "parse identity", wantErr: ErrParseIdentity, wantText: "failed to parse identity"},
 	}
 
-	for _, tt := range tests {
+	for i, tt := range sentinels {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			want, must := assert.New(t), require.New(t)
+			want := assert.New(t)
 
-			got := ErrEncrypt.Wrap(tt.err, tt.args...)
-			must.Error(got)
+			want.Equal(tt.wantText, tt.wantErr.Error())
+			want.ErrorIs(tt.wantErr, tt.wantErr)
 
-			want.Equal(tt.wantMessage, got.Error())
-			// The sentinel is always recoverable from the chain.
-			want.ErrorIs(got, ErrEncrypt)
-			// A different sentinel must not match.
-			want.NotErrorIs(got, ErrDecrypt)
-
-			if tt.wantCause {
-				want.ErrorIs(got, cause)
+			// Distinct sentinels never match each other.
+			for j, other := range sentinels {
+				if j != i {
+					want.NotErrorIs(tt.wantErr, other.wantErr)
+				}
 			}
 		})
 	}
+}
+
+// TestSentinels_With verifies the sentinels compose with errs.Const.With: the
+// sentinel and the cause both stay recoverable from the wrapped chain.
+func TestSentinels_With(t *testing.T) {
+	t.Parallel()
+	must := require.New(t)
+
+	cause := errors.New("root cause")
+
+	got := ErrOpenFile.With(cause, "path/to/file")
+	must.ErrorIs(got, ErrOpenFile)
+	must.ErrorIs(got, cause)
+	must.NotErrorIs(got, ErrDecrypt)
 }

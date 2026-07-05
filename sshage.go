@@ -24,13 +24,13 @@ type Identities []age.Identity
 func Encrypt(w io.Writer, r io.Reader, recipients Recipients) error {
 	ew, err := age.Encrypt(w, recipients...)
 	if err != nil {
-		return ErrEncrypt.Wrap(err)
+		return ErrEncrypt.With(err)
 	}
 	if _, err := io.Copy(ew, r); err != nil {
-		return ErrEncrypt.Wrap(err)
+		return ErrEncrypt.With(err)
 	}
 	if err := ew.Close(); err != nil {
-		return ErrEncrypt.Wrap(err)
+		return ErrEncrypt.With(err)
 	}
 	return nil
 }
@@ -39,10 +39,10 @@ func Encrypt(w io.Writer, r io.Reader, recipients Recipients) error {
 func Decrypt(w io.Writer, r io.Reader, identities Identities) error {
 	dr, err := age.Decrypt(r, identities...)
 	if err != nil {
-		return ErrDecrypt.Wrap(err)
+		return ErrDecrypt.With(err)
 	}
 	if _, err := io.Copy(w, dr); err != nil {
-		return ErrDecrypt.Wrap(err)
+		return ErrDecrypt.With(err)
 	}
 	return nil
 }
@@ -55,12 +55,12 @@ type IdentityFile string
 func ParseIdentities(path IdentityFile) (Identities, error) {
 	data, err := os.ReadFile(string(path))
 	if err != nil {
-		return nil, ErrOpenFile.Wrap(err, path)
+		return nil, ErrOpenFile.With(err, path)
 	}
 
 	id, err := agessh.ParseIdentity(data)
 	if err != nil {
-		return nil, ErrParseIdentity.Wrap(err)
+		return nil, ErrParseIdentity.With(err)
 	}
 
 	return Identities{id}, nil
