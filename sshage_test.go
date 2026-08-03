@@ -179,15 +179,23 @@ func TestParseIdentities(t *testing.T) {
 	want.Equal(plaintext, decrypted.Bytes())
 }
 
-func TestParseIdentities_Nonexistent(t *testing.T) {
+// TestErrOpenFileWrapsAnUnreadableIdentityFile names ErrOpenFile's claim: a
+// file that cannot be READ carries ErrOpenFile and never ErrParseIdentity. The
+// two are separate sentinels so a caller can tell "point me at a key file" from
+// "that file is not a key" — a distinction lost if either leaked the other.
+func TestErrOpenFileWrapsAnUnreadableIdentityFile(t *testing.T) {
 	t.Parallel()
 	must := require.New(t)
 
 	_, err := ParseIdentities("/nonexistent/path/id_ed25519")
 	must.ErrorIs(err, ErrOpenFile)
+	must.NotErrorIs(err, ErrParseIdentity)
 }
 
-func TestParseIdentities_BadKey(t *testing.T) {
+// TestErrParseIdentityWrapsAnUnparseableKey names ErrParseIdentity's claim: a
+// file that reads fine but holds no SSH private key carries ErrParseIdentity
+// and never ErrOpenFile — the other half of the distinction above.
+func TestErrParseIdentityWrapsAnUnparseableKey(t *testing.T) {
 	t.Parallel()
 	must := require.New(t)
 
@@ -196,6 +204,7 @@ func TestParseIdentities_BadKey(t *testing.T) {
 
 	_, err := ParseIdentities(IdentityFile(keyFile))
 	must.ErrorIs(err, ErrParseIdentity)
+	must.NotErrorIs(err, ErrOpenFile)
 }
 
 // failWriter fails every write, exercising encrypt/decrypt copy error paths.
